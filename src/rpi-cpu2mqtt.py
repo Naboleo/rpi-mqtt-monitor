@@ -14,10 +14,8 @@ hostname = socket.gethostname()
 
 
 def check_used_space(path):
-		st = os.statvfs(path)
-		free_space = st.f_bavail * st.f_frsize
-		total_space = st.f_blocks * st.f_frsize
-		used_space = int(100 - ((free_space / total_space) * 100))
+		used_space= subprocess.Popen("df -h / |tail +2| awk '{print $5}'", shell=True, stdout=subprocess.PIPE).communicate()[0]
+		used_space = used_space[:-1]
 		return used_space
 
 def check_cpu_info():
@@ -142,7 +140,6 @@ if __name__ == '__main__':
 		# collect the monitored values		
 		if config.cpu_load or config.uptime or config.cpu_average or config.uptime:
 			cpu_info = check_cpu_info()
-			print cpu_info
 		if config.cpu_temp:
 			cpu_temp = check_cpu_temp()
 		if config.used_space:
