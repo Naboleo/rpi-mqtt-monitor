@@ -20,14 +20,27 @@ def check_used_space(path):
 		used_space = int(100 - ((free_space / total_space) * 100))
 		return used_space
 
-def check_cpu_load():
+def check_cpu_info():
 		# bash command to get cpu load from uptime command
 		p = subprocess.Popen("uptime", shell=True, stdout=subprocess.PIPE).communicate()[0]
-		cores = subprocess.Popen("nproc", shell=True, stdout=subprocess.PIPE).communicate()[0]		
+		cores = int(subprocess.Popen("nproc", shell=True, stdout=subprocess.PIPE).communicate()[0])
 		cpu_load = p.split("average:")[1].split(",")[0].replace(' ', '')
-		cpu_load = float(cpu_load)/int(cores)*100
+		cpu_load = float(cpu_load)/cores*100
 		cpu_load = round(float(cpu_load), 1)
-		return cpu_load
+		p=p.split(",")
+		avr=p[2].split(": ")
+		avr1=float(avr[1])
+		avr5=float(p[3])
+		avr15=float(p[4])
+		up=p[0].split("up")
+		print up
+		uptime=up[1].strip()
+		return [cpu_load,cores,avr1,avr5,avr15,uptime]
+
+def check_cpu_average():
+		full_cmd = "cat /proc/loadavg|cut -d' ' -f1-3"
+		cpu_average = subprocess.Popen(full_cmd, shell=True, stdout=subprocess.PIPE).communicate()[0]
+		return cpu_average
 		
 def check_voltage():
 		full_cmd = "vcgencmd measure_volts | cut -f2 -d= | sed 's/000//'"
@@ -48,7 +61,7 @@ def check_memory():
 		return memory		
 		
 def check_cpu_temp():
-		full_cmd = "/opt/vc/bin/vcgencmd measure_temp"
+		full_cmd = "vcgencmd measure_temp"
 		p = subprocess.Popen(full_cmd, shell=True, stdout=subprocess.PIPE).communicate()[0]
 		cpu_temp = p.replace('\n', ' ').replace('\r', '').split("=")[1].split("'")[0]
 		return cpu_temp
@@ -58,7 +71,7 @@ def check_sys_clock_speed():
 		return subprocess.Popen(full_cmd, shell=True, stdout=subprocess.PIPE).communicate()[0]
 
 	
-def publish_to_mqtt (cpu_load = 0, cpu_temp = 0, used_space = 0, voltage = 0, sys_clock_speed = 0, swap = 0, memory = 0):
+def publish_to_mqtt (cpu_info = [0,0,0,0,0,0], cpu_temp = 0, used_space = 0, voltage = 0, sys_clock_speed = 0, swap = 0, memory = 0):
 		# connect to mqtt server
 		client = paho.Client()
 		client.username_pw_set(config.mqtt_user, config.mqtt_password)
@@ -66,7 +79,18 @@ def publish_to_mqtt (cpu_load = 0, cpu_temp = 0, used_space = 0, voltage = 0, sy
 
 		# publish monitored values to MQTT
 		if config.cpu_load:
-			client.publish(config.mqtt_topic_prefix+"/"+hostname+"/cpuload", cpu_load, qos=1)
+			client.publish(config.mqtt_topic_prefix+"/"+hostname+"/cpuload", cpu_info[0], qos=1)
+			time.sleep(config.sleep_time)
+		if config.cores:
+			client.publish(config.mqtt_topic_prefix+"/"+hostname+"/cores", cpu_info[1], qos=1)
+			time.sleep(config.sleep_time)
+		if config.cpu_average:
+			client.publish(config.mqtt_topic_prefix+"/"+hostname+"/cpu1m", cpu_info[2], qos=1)
+			client.publish(config.mqtt_topic_prefix+"/"+hostname+"/cpu5m", cpu_info[3], qos=1)
+			client.publish(config.mqtt_topic_prefix+"/"+hostname+"/cpu15m", cpu_info[4], qos=1)
+			time.sleep(config.sleep_time)
+		if config.uptime:
+			client.publish(config.mqtt_topic_prefix+"/"+hostname+"/uptime", cpu_info[5], qos=1)
 			time.sleep(config.sleep_time)
 		if config.cpu_temp:
 			client.publish(config.mqtt_topic_prefix+"/"+hostname+"/cputemp", cpu_temp, qos=1)
@@ -89,10 +113,10 @@ def publish_to_mqtt (cpu_load = 0, cpu_temp = 0, used_space = 0, voltage = 0, sy
 		# disconect from mqtt server
 		client.disconnect()
 
-def bulk_publish_to_mqtt (cpu_load = 0, cpu_temp = 0, used_space = 0, voltage = 0, sys_clock_speed = 0, swap = 0, memory = 0):
+def bulk_publish_to_mqtt (cpu_info = [0,0,0,0,0,0], cpu_temp = 0, used_space = 0, voltage = 0, sys_clock_speed = 0, swap = 0, memory = 0):
 		# compose the CSV message containing the measured values
 		
-		values = cpu_load, float(cpu_temp), used_space, float(voltage), int(sys_clock_speed), swap, memory
+		values = cpu_info, float(cpu_temp), used_space, float(voltage), int(sys_clock_speed), swap, memory
 		values = str(values)[1:-1]
 
 		# connect to mqtt server
@@ -110,14 +134,15 @@ def bulk_publish_to_mqtt (cpu_load = 0, cpu_temp = 0, used_space = 0, voltage = 
 
 if __name__ == '__main__':
 		# set all monitored values to False in case they are turned off in the config
-		cpu_load = cpu_temp = used_space = voltage = sys_clock_speed = swap = memory = False
+		cpu_load = cores = cpu_average = cpu_temp = used_space = voltage = sys_clock_speed = swap = memory = False
 		
 		# delay the execution of the script
 		time.sleep(config.random_delay)
 		
 		# collect the monitored values		
-		if config.cpu_load:
-			cpu_load = check_cpu_load()
+		if config.cpu_load or config.uptime or config.cpu_average or config.uptime:
+			cpu_info = check_cpu_info()
+			print cpu_info
 		if config.cpu_temp:
 			cpu_temp = check_cpu_temp()
 		if config.used_space:
@@ -133,6 +158,6 @@ if __name__ == '__main__':
 
 		# Publish messages to MQTT
 		if config.group_messages:
-			bulk_publish_to_mqtt(cpu_load, cpu_temp, used_space, voltage, sys_clock_speed, swap, memory)
+			bulk_publish_to_mqtt(cpu_info, cpu_temp, used_space, voltage, sys_clock_speed, swap, memory)
 		else:
-			publish_to_mqtt(cpu_load, cpu_temp, used_space, voltage, sys_clock_speed, swap, memory)
+			publish_to_mqtt(cpu_info, cpu_temp, used_space, voltage, sys_clock_speed, swap, memory)
